@@ -29,7 +29,7 @@ MAX_STEPS = 15
 
 PROVIDERS = {
     # name: (base_url, api-key env var, default model)
-    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "gemini-2.5-flash"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "gemini-3.5-flash-lite"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "openai/gpt-oss-120b"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "openai/gpt-oss-20b:free"),
     "ollama": ("http://localhost:11434/v1", None, "qwen3:8b"),
@@ -105,13 +105,13 @@ OLD_TOOL_RESULT_CHARS = 1500  # older tool outputs are shortened before each cal
 
 
 def build_fallbacks(provider: str) -> list[Candidate]:
-    """Fallback chain from LLM_FALLBACKS (e.g. "gemini:gemini-2.5-flash-lite,groq"), or a sensible default
+    """Fallback chain from LLM_FALLBACKS (e.g. "gemini:gemini-3.8-flash,groq"), or a sensible default
     that only includes providers you have a key for."""
     spec = os.getenv("LLM_FALLBACKS")
     if spec is None:
         parts = []
         if provider == "gemini":
-            parts.append("gemini:gemini-2.5-flash-lite")
+            parts.append("gemini:gemini-3.8-flash")
         for p in ("gemini", "groq", "openrouter"):
             if p != provider and os.getenv(PROVIDERS[p][1]):
                 parts.append(p)
@@ -140,6 +140,17 @@ def _compact_history(messages: list[dict]) -> list[dict]:
     return out
 
 
+def _tool_call_dict(c) -> dict:
+    """Serialize a tool call for the history. Gemini 3 attaches a thought signature in
+    `extra_content`; it must be sent back on the next turn or the API returns 400."""
+    d = {"id": c.id, "type": "function",
+         "function": {"name": c.function.name, "arguments": c.function.arguments}}
+    extra = getattr(c, "extra_content", None)
+    if extra:
+        d["extra_content"] = extra
+    return d
+
+
 def _loop_openai(user_message, client, model, emit, max_steps, provider="gemini", fallbacks=None):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_message}]
     trace, usage = [], {"input_tokens": 0, "output_tokens": 0}
@@ -158,9 +169,7 @@ def _loop_openai(user_message, client, model, emit, max_steps, provider="gemini"
             return _finish(trace, emit, step, (msg.content or "").strip(), usage)
 
         messages.append({"role": "assistant", "content": msg.content or "",
-                         "tool_calls": [{"id": c.id, "type": "function",
-                                         "function": {"name": c.function.name, "arguments": c.function.arguments}}
-                                        for c in calls]})
+                         "tool_calls": [_tool_call_dict(c) for c in calls]})
         if msg.content and msg.content.strip():
             _record(trace, emit, {"type": "thinking_text", "step": step, "text": msg.content})
         for c in calls:

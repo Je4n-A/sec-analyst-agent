@@ -71,7 +71,7 @@ Set `LLM_PROVIDER` in `.env`:
 Free APIs limit requests per minute and per day. The agent handles this in four ways (`agent/ratelimit.py`):
 1. **Pacing:** it waits a few seconds between AI calls so it stays under the requests-per-minute limit.
 2. **Automatic retry:** on a 429 error it waits for the delay the server suggests, then retries, up to 4 times.
-3. **Fallback chain:** if a model is still throttled or its daily quota is used up, it switches to the next model, for example `gemini-2.5-flash` → `gemini-2.5-flash-lite` → Groq (if you added a Groq key), and keeps going in the same run.
+3. **Fallback chain:** if a model is still throttled or its daily quota is used up, it switches to the next model, for example `gemini-3.5-flash-lite` → `gemini-3.8-flash` → Groq (if you added a Groq key), and keeps going in the same run.
 4. **Fewer tokens:** older tool results are shortened before each call, the 10-K excerpts are capped, and the prompt asks for all the math in one Python call.
 
 **Replay mode (demo backup):** each run is saved in `outputs/`. In the app sidebar, choose **Replay a saved run** to play a previous run back step by step with **no API calls**.

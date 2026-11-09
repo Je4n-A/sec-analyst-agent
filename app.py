@@ -4,14 +4,18 @@ import os
 import time
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from agent import run_agent, save_run  # noqa: E402
-from agent.core import DEFAULT_PROVIDER, PROVIDERS, build_fallbacks, default_model, make_client  # noqa: E402
+from agent.core import PROVIDERS, build_fallbacks, default_model, make_client  # noqa: E402
 from agent.tools import ROOT  # noqa: E402
+
+PROVIDER = "gemini"
+SECTION_NAMES = {"mdna": "Management's Discussion & Analysis", "risk_factors": "Risk Factors"}
 
 st.set_page_config(page_title="SEC Filing Analyst Agent", page_icon="📊", layout="wide")
 st.title("📊 SEC Filing Analyst Agent")
@@ -26,45 +30,76 @@ with st.sidebar:
                     help="Replay re-plays a previous run step by step without calling any API. "
                          "Use it as a backup if you hit rate limits during the demo.")
     if mode.startswith("Live"):
-        names = list(PROVIDERS)
-        provider = st.selectbox("LLM provider", names, index=names.index(DEFAULT_PROVIDER),
-                                help="gemini, groq, openrouter, and ollama have free options")
-        key_env = PROVIDERS[provider][1]
-        api_key = (st.text_input(f"API key ({key_env})", value=os.getenv(key_env, ""), type="password")
-                   if key_env else "")
-        model = st.text_input("Model", value=default_model(provider) if provider == DEFAULT_PROVIDER
-                              else PROVIDERS[provider][2])
-        st.caption("If rate-limited, the agent waits and retries automatically, then falls back to "
-                   "other models/providers you have keys for.")
+        key_env = PROVIDERS[PROVIDER][1]
+        api_key = os.getenv(key_env, "")  # read from .env only; never shown in the UI
+        model = st.text_input("Model", value=default_model(PROVIDER))
     else:
         if not saved_traces:
             st.warning("No saved runs yet. Do a live run first (or `python cli.py AAPL`).")
         replay_file = st.selectbox("Saved run", saved_traces, format_func=lambda p: p.stem.replace("_trace", ""))
         replay_speed = st.slider("Seconds per step", 0.2, 3.0, 1.0, 0.1)
-    st.markdown("**Agent tools**")
-    st.markdown("- `get_company_facts`: SEC XBRL financials\n"
-                "- `get_filing_section`: 10-K MD&A / Risk Factors\n"
-                "- `run_python`: sandboxed calculations")
+
+
+# ----------------------------------------------------------------------------- Event rendering
+def _describe_call(name, args):
+    """Plain-English description of a tool call (no function names or code)."""
+    ticker = (args.get("ticker") or "").upper()
+    if name == "get_company_facts":
+        return f"Retrieving audited financial statements{f' for {ticker}' if ticker else ''} from SEC filings"
+    if name == "get_filing_section":
+        section = SECTION_NAMES.get(args.get("section", "mdna"), "the annual report")
+        return f"Reading the {section} section of the latest 10-K{f' for {ticker}' if ticker else ''}"
+    if name == "run_python":
+        return "Running financial calculations"
+    return "Gathering information"
+
+
+def _show_result(name, output):
+    try:
+        data = json.loads(output)
+    except Exception:
+        st.text(output[:3000])
+        return
+    if isinstance(data, dict) and data.get("error"):
+        st.warning("This step could not be completed. The agent will adjust and continue.")
+        return
+
+    if name == "get_company_facts":
+        rows = {k.replace("_", " ").title(): v["values"] for k, v in data.get("metrics", {}).items()}
+        if rows:
+            df = pd.DataFrame(rows).T
+            df.columns = [f"FY ending {c}" for c in df.columns]
+            st.caption(f"{data.get('company', '')} · values in USD as reported in 10-K filings")
+            st.dataframe(df.style.format(lambda v: "—" if pd.isna(v) else f"{v:,.2f}" if abs(v) < 1000
+                                         else f"{v:,.0f}"))
+        if data.get("missing_metrics"):
+            st.caption("Not reported: " + ", ".join(m.replace("_", " ") for m in data["missing_metrics"]))
+    elif name == "get_filing_section":
+        st.caption(f"{data.get('company', '')} · Form {data.get('form', '10-K')} · "
+                   f"period ending {data.get('report_date', '?')} · filed {data.get('filing_date', '?')}")
+        if data.get("url"):
+            st.markdown(f"[View the filing on SEC.gov]({data['url']})")
+        st.markdown(f"> {data.get('text', '')[:1200]}…")
+    elif name == "run_python":
+        if data.get("ok") and data.get("stdout", "").strip():
+            st.text(data["stdout"].strip())
+        elif not data.get("ok"):
+            st.warning("A calculation could not be completed. The agent will adjust and continue.")
 
 
 def render_event(box, ev):
     with box:
         if ev["type"] == "notice":
-            st.warning(f"⏳ {ev['text']}")
+            st.caption(f"⏳ {ev['text']}")
         elif ev["type"] == "thinking_text":
-            st.info(f"**Step {ev['step']}:** {ev['text']}")
+            st.markdown(f"**Analyst note:** {ev['text']}")
         elif ev["type"] == "tool_call":
-            with st.expander(f"🔧 Step {ev['step']}: `{ev['name']}`", expanded=ev["name"] == "run_python"):
-                if ev["name"] == "run_python":
-                    st.code(ev["input"].get("code", ""), language="python")
-                else:
-                    st.json(ev["input"])
+            st.markdown(f"**Step {ev['step']} · {_describe_call(ev['name'], ev.get('input') or {})}**")
         elif ev["type"] == "tool_result":
-            with st.expander(f"✅ Result from `{ev['name']}`", expanded=False):
-                try:
-                    st.json(json.loads(ev["output"]))
-                except Exception:
-                    st.text(ev["output"][:5000])
+            label = {"get_company_facts": "View financial data", "get_filing_section": "View filing excerpt",
+                     "run_python": "View calculation results"}.get(ev["name"], "View details")
+            with st.expander(label, expanded=False):
+                _show_result(ev["name"], ev["output"])
 
 
 def show_memo(memo, caption, file_name):
@@ -79,7 +114,7 @@ if mode.startswith("Replay"):
     if saved_traces and st.button("Replay run", type="primary"):
         data = json.loads(Path(replay_file).read_text(encoding="utf-8"))
         st.markdown(f"**Question:** {data['question']}")
-        st.subheader("Agent reasoning & tool calls")
+        st.subheader("Agent reasoning & research steps")
         box = st.container()
         memo = ""
         for ev in data["trace"]:
@@ -110,22 +145,20 @@ for i, (t, q) in enumerate([("AAPL", "Earnings quality trend"), ("MSFT", "Margin
         ticker, focus, run_clicked = t, q, True
 
 if run_clicked and ticker:
-    if key_env and not api_key:
-        st.error(f"Add your {provider} API key in the sidebar.")
+    if not api_key:
+        st.error(f"No Gemini API key found. Add {key_env} to your .env file and restart the app.")
         st.stop()
-    if key_env:
-        os.environ[key_env] = api_key
-    client = make_client(provider, api_key=api_key)
+    client = make_client(PROVIDER, api_key=api_key)
 
     question = f"Analyze {ticker}. Focus: {focus or 'General fundamental health check.'}"
-    st.subheader("Agent reasoning & tool calls")
+    st.subheader("Agent reasoning & research steps")
     box = st.container()
 
     try:
         with st.spinner("Agent is working..."):
-            result = run_agent(question, client=client, model=model, provider=provider,
+            result = run_agent(question, client=client, model=model, provider=PROVIDER,
                                on_event=lambda ev: render_event(box, ev),
-                               fallbacks=None if provider == "anthropic" else build_fallbacks(provider))
+                               fallbacks=build_fallbacks(PROVIDER))
     except Exception as e:  # show a friendly message instead of a stack trace during the demo
         st.error(f"{type(e).__name__}: {e}")
         st.info("Tip: switch the sidebar to **Replay a saved run** to show a previous run.")

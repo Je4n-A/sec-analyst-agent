@@ -4,7 +4,7 @@ Three layers of defense:
   1. Pacing: wait a minimum interval between LLM calls (free tiers cap requests/minute).
   2. Retry with backoff: on HTTP 429, wait (using the server's suggested delay when given) and retry.
   3. Fallback chain: if a model stays rate-limited, or its daily quota is used up, switch to the
-     next model/provider (e.g. gemini-2.5-flash -> gemini-2.5-flash-lite -> groq) and keep going.
+     next model/provider (e.g. gemini-3.5-flash-lite -> gemini-3.8-flash -> groq) and keep going.
 """
 from __future__ import annotations
 

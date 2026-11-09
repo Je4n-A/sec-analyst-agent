@@ -32,6 +32,8 @@ Given a ticker (and optionally a focus question), produce a concise, evidence-ba
 ## Rules
 - Every number must trace to `get_company_facts` output or a `run_python` result.
 - If a metric is missing or a tag changes across years, say so explicitly. Never fill gaps with estimates presented as facts.
+- "Most recent" means the latest fiscal year end in `get_company_facts` output, not what you remember from training. Filings may be newer than your knowledge.
+- If a tool keeps failing, say so in the memo and do not substitute numbers from memory.
 - Clearly separate **facts** (from filings) from **interpretation** (your analysis).
 - Do **not** give buy/sell/hold recommendations or price targets. You support a human's decision; you don't make it.
 - Be concise. Use tables for numbers, short bullets for analysis.
