@@ -16,6 +16,34 @@ from agent.tools import ROOT  # noqa: E402
 
 PROVIDER = "gemini"
 SECTION_NAMES = {"mdna": "Management's Discussion & Analysis", "risk_factors": "Risk Factors"}
+# Models confirmed to work with the agent (tool calling via Gemini's OpenAI-compatible API).
+GEMINI_MODELS = {
+    "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite (fast, higher free quota)",
+    "gemini-3.8-flash": "Gemini 3.8 Flash (stronger reasoning, lower free quota)",
+}
+REPLAY_TIP = " Switch the sidebar to **Replay a saved run** to show a previous run."
+
+
+def friendly_error(e: Exception) -> str:
+    """Turn API/network exceptions into a short, demo-friendly message."""
+    status = getattr(e, "status_code", None)
+    detail = f"{getattr(e, 'body', '')} {e}".lower()
+    name = type(e).__name__
+    if "api key" in detail or "api_key" in detail or status in (401, 403):
+        return "Invalid API key. Check the Gemini key in your .env file, then restart the app."
+    if status == 404 or "no longer available" in detail or "not found" in detail:
+        return "Model unavailable. Pick a different model in the sidebar."
+    if status == 429 or "rate-limited" in detail or "quota" in detail or "resource_exhausted" in detail:
+        return "Daily quota reached for the available models." + REPLAY_TIP
+    if "timeout" in name.lower() or "timed out" in detail:
+        return "The AI service took too long to respond. Please try again."
+    if "connection" in name.lower():
+        return "Could not reach the AI service. Check your internet connection and try again."
+    if status and status >= 500:
+        return "The AI service is having problems right now. Please try again in a minute." + REPLAY_TIP
+    if status == 400:
+        return "The AI service rejected the request. Try again, or pick a different model in the sidebar."
+    return "Something went wrong while running the analysis. Please try again." + REPLAY_TIP
 
 st.set_page_config(page_title="SEC Filing Analyst Agent", page_icon="📊", layout="wide")
 st.title("📊 SEC Filing Analyst Agent")
@@ -32,7 +60,8 @@ with st.sidebar:
     if mode.startswith("Live"):
         key_env = PROVIDERS[PROVIDER][1]
         api_key = os.getenv(key_env, "")  # read from .env only; never shown in the UI
-        model = st.text_input("Model", value=default_model(PROVIDER))
+        models = list(dict.fromkeys([default_model(PROVIDER), *GEMINI_MODELS]))
+        model = st.selectbox("Model", models, format_func=lambda m: GEMINI_MODELS.get(m, m))
     else:
         if not saved_traces:
             st.warning("No saved runs yet. Do a live run first (or `python cli.py AAPL`).")
@@ -158,10 +187,11 @@ if run_clicked and ticker:
         with st.spinner("Agent is working..."):
             result = run_agent(question, client=client, model=model, provider=PROVIDER,
                                on_event=lambda ev: render_event(box, ev),
-                               fallbacks=build_fallbacks(PROVIDER))
+                               fallbacks=[c for c in build_fallbacks(PROVIDER) if c.model != model])
     except Exception as e:  # show a friendly message instead of a stack trace during the demo
-        st.error(f"{type(e).__name__}: {e}")
-        st.info("Tip: switch the sidebar to **Replay a saved run** to show a previous run.")
+        st.error(friendly_error(e))
+        with st.expander("Technical details"):
+            st.code(f"{type(e).__name__}: {e}", language=None)
         st.stop()
 
     path = save_run(ticker, question, result)
