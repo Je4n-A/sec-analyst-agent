@@ -13,6 +13,7 @@ load_dotenv()
 from agent import run_agent, save_run  # noqa: E402
 from agent.core import PROVIDERS, build_fallbacks, default_model, make_client  # noqa: E402
 from agent.tools import ROOT  # noqa: E402
+from dashboard import facts_from_trace, render_dashboard  # noqa: E402
 
 PROVIDER = "gemini"
 SECTION_NAMES = {"mdna": "Management's Discussion & Analysis", "risk_factors": "Risk Factors"}
@@ -153,6 +154,7 @@ if mode.startswith("Replay"):
             render_event(box, ev)
             if ev["type"] in ("tool_call", "thinking_text"):
                 time.sleep(replay_speed)
+        render_dashboard(facts_from_trace(data["trace"]))
         u = data.get("usage", {})
         show_memo(memo, f"Replayed from {Path(replay_file).name} · {u.get('input_tokens', 0):,} input / "
                         f"{u.get('output_tokens', 0):,} output tokens in the original run",
@@ -195,6 +197,7 @@ if run_clicked and ticker:
         st.stop()
 
     path = save_run(ticker, question, result)
+    render_dashboard(facts_from_trace(result["trace"]))
     show_memo(result["memo"],
               f"{result['steps']} agent steps · {result['usage']['input_tokens']:,} input / "
               f"{result['usage']['output_tokens']:,} output tokens · saved to {path.name}",
