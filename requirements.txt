@@ -1,0 +1,7 @@
+openai>=1.40       # client for Gemini / Groq / OpenRouter / Ollama (OpenAI-compatible APIs)
+anthropic>=0.40    # only needed if LLM_PROVIDER=anthropic
+requests>=2.31
+beautifulsoup4>=4.12
+pandas>=2.0
+streamlit>=1.35
+python-dotenv>=1.0
