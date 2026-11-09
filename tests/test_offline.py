@@ -75,6 +75,22 @@ def test_run_python_uses_facts():
     assert not tools.run_python("raise ValueError('x')")["ok"]
 
 
+def test_run_python_preloads_df_and_years():
+    tools.get_company_facts("DEMO")
+    r = tools.run_python(
+        "print(years)\n"
+        "print(list(df.index) == years, df.loc[years[-1], 'revenue'], df['net_income'].sum())\n"
+        "print('inventory' in df.columns)")
+    assert r["ok"], r
+    lines = r["stdout"].strip().splitlines()
+    assert lines[0] == str([f"{y}-09-30" for y in YEARS]), lines
+    assert lines[1].split() == ["True", "390", "268"], lines
+    assert lines[2] == "False", lines  # metric missing from facts -> not a column
+    # Variables don't persist, but every fresh call gets df/years again.
+    r2 = tools.run_python("print(len(years), df.shape[0])")
+    assert r2["ok"] and r2["stdout"].split() == ["4", "4"], r2
+
+
 class FakeLLM:
     """Scripted model: call facts -> run python -> read MD&A -> answer."""
     def __init__(self):

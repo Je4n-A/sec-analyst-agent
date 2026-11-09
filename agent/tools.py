@@ -234,6 +234,13 @@ try:
     facts = json.load(open(r'{facts}'))
 except FileNotFoundError:
     facts = {{}}
+# Each call is a fresh process, so rebuild the convenience variables every time.
+_anchor = (facts.get('revenue') or {{}}).get('values') or next(
+    (m['values'] for m in facts.values() if m.get('values')), {{}})
+years = sorted(_anchor)
+df = pd.DataFrame({{m: v.get('values') or {{}} for m, v in facts.items()}}).reindex(years).apply(
+    pd.to_numeric, errors='coerce')
+df.index.name = 'fiscal_year_end'
 """
 
 
@@ -287,9 +294,13 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "run_python",
-        "description": "Execute Python code for ALL calculations. Preloaded: `facts` dict "
-                       "(metric -> {tag, unit, values: {fiscal_year_end: value}}), `pd` (pandas), `math`. "
-                       "Values may be None if missing. Print results; only stdout is returned.",
+        "description": "Execute Python code for ALL calculations. Each run_python call is a fresh process; "
+                       "variables do NOT persist between calls. `facts`, `years`, and `df` are always "
+                       "preloaded. Do all calculations in one self-contained call. "
+                       "`facts`: dict metric -> {tag, unit, values: {fiscal_year_end: value}}. "
+                       "`years`: sorted list of fiscal-year-end keys. "
+                       "`df`: pandas DataFrame, metrics as columns, years as the index (missing values are NaN). "
+                       "`pd` (pandas) and `math` are imported. Print results; only stdout is returned.",
         "input_schema": {
             "type": "object",
             "properties": {"code": {"type": "string", "description": "Python code to run"}},
