@@ -170,7 +170,6 @@ def render_dashboard(data: dict | None):
     if df.empty:
         return
 
-    st.subheader(f"Financial dashboard · {data.get('company', data.get('ticker', ''))}")
     latest, tiles = _kpis(df)
     if tiles:
         st.caption(f"Latest fiscal year: {latest} · figures from 10-K filings via SEC XBRL")
